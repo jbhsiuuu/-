@@ -1,0 +1,50 @@
+import streamlit as st
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# 1. 初始化模型
+class WindGenerator(torch.nn.Module):  # 结构须与训练时一致
+    def __init__(self):
+        super().__init__()
+        self.model = torch.nn.Sequential(
+            torch.nn.Linear(1, 1024),
+            torch.nn.Unflatten(1, (64, 4, 4)),
+            torch.nn.ConvTranspose2d(64, 32, 4, 4, 0),
+            torch.nn.ReLU(),
+            torch.nn.ConvTranspose2d(32, 16, 4, 4, 0),
+            torch.nn.ReLU(),
+            torch.nn.ConvTranspose2d(16, 1, 4, 2, 1),
+        )
+
+    def forward(self, x): return self.model(x)
+
+
+@st.cache_resource
+def load_ai():
+    model = WindGenerator()
+    model.load_state_dict(torch.load('wind_predictor.pth'))
+    model.eval()
+    return model
+
+
+st.title("🏗️ 高层建筑表面风压 AI 实时预测系统")
+st.write("基于 TPU 数据库 32,768 帧高频原始数据训练")
+
+# 2. 交互控制
+angle = st.slider("选择风向角 (Wind Direction)", 0.0, 45.0, 15.0)
+
+if st.button("开始 AI 预测"):
+    model = load_ai()
+    with torch.no_grad():
+        input_angle = torch.tensor([[angle / 45.0]])
+        output = model(input_angle).squeeze().numpy()
+
+    # 3. 结果展示
+    fig, ax = plt.subplots()
+    im = ax.imshow(output.T, cmap='jet', origin='lower')
+    plt.colorbar(im, label="Predicted Cp (Mean)")
+    ax.set_title(f"Predicted Wind Pressure Field at {angle}°")
+    st.pyplot(fig)
+    st.success(f"预测完成！针对 H=0.2m, B=0.1m 建筑模型优化")
