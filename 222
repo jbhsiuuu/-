@@ -1,0 +1,73 @@
+import scipy.io as sio
+import numpy as np
+import os
+import glob
+from scipy.interpolate import griddata
+import matplotlib.pyplot as plt
+
+
+def process_single_file(file_path, resolution=128):
+    """解析单个TPU .mat文件，返回角度和插值后的风压云图"""
+    data = sio.loadmat(file_path)
+
+    # 提取物理参数
+    angle = float(data['Wind_direction_angle'][0, 0])
+    cp_raw = data['Wind_pressure_coefficients']  # (32768, 200)
+    cp_mean = np.mean(cp_raw, axis=0)
+
+    # 提取测点坐标
+    locations = data['Location_of_measured_points']
+    x_coords = locations[0, :]
+    y_coords = locations[1, :]
+
+    # 制作网格并插值
+    grid_x, grid_y = np.mgrid[min(x_coords):max(x_coords):complex(resolution),
+    min(y_coords):max(y_coords):complex(resolution)]
+    grid_cp = griddata((x_coords, y_coords), cp_mean, (grid_x, grid_y), method='cubic')
+    grid_cp = np.nan_to_num(grid_cp, nan=0.0)
+
+    return angle, grid_cp
+
+
+if __name__ == "__main__":
+    # --- 核心修复：获取脚本所在的绝对路径 ---
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"当前脚本运行路径: {os.getcwd()}")
+    print(f"脚本所在文件夹: {script_dir}")
+
+    # 构建搜索模式，匹配你上传的 000, 015, 030, 045 文件
+    search_pattern = os.path.join(script_dir, "T112_4_*.mat")
+    mat_files = glob.glob(search_pattern)
+    mat_files.sort()
+
+    if len(mat_files) == 0:
+        print("❌ 错误：依然没找到 .mat 文件！")
+        print(f"请检查这些文件是否在文件夹中: {script_dir}")
+        # 列出该文件夹下所有文件，帮你排查
+        print(f"文件夹内的文件列表: {os.listdir(script_dir)}")
+    else:
+        dataset_x, dataset_y = [], []
+        print(f"✅ 检测到 {len(mat_files)} 个工况，开始制作...")
+
+        for f in mat_files:
+            try:
+                angle, cp_map = process_single_file(f)
+                dataset_x.append(angle)
+                dataset_y.append(cp_map)
+                print(f"已处理: {os.path.basename(f)} ({angle}°)")
+            except Exception as e:
+                print(f"处理 {f} 失败: {e}")
+
+        # 保存结果
+        X, Y = np.array(dataset_x), np.array(dataset_y)
+        np.save(os.path.join(script_dir, 'X_angles.npy'), X)
+        np.save(os.path.join(script_dir, 'Y_cp_maps.npy'), Y)
+
+        print(f"\n数据集制作完成！形状: X={X.shape}, Y={Y.shape}")
+
+        # 绘图预览
+        plt.figure(figsize=(6, 5))
+        plt.imshow(Y[-1].T, extent=(0, 1, 0, 1), origin='lower', cmap='jet')
+        plt.colorbar(label='Cp Mean')
+        plt.title(f"Preview: Angle {X[-1]}°")
+        plt.show()
